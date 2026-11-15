@@ -10,7 +10,8 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 PORT = 8080
 DIR = os.path.dirname(os.path.abspath(__file__))
-UPSTREAM = {'/proxy/': 'https://api.adsb.lol/', '/proxy2/': 'https://api.airplanes.live/'}
+UPSTREAM = {'/proxy/': 'https://api.adsb.lol/', '/proxy2/': 'https://api.airplanes.live/',
+            '/proxy3/': 'https://api.planespotters.net/'}
 LABEL = 'de.matthias.airscanner'
 PLIST = os.path.expanduser(f'~/Library/LaunchAgents/{LABEL}.plist')
 
