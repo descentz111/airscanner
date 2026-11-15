@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Airscanner">
+<title>Airscanner</title>
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{--bg:#14171c;--card:#1f242b;--line:#2c333c;--txt:#e9edf2;--mut:#8b96a3;--acc:#ffb020;--sel:#ff5a1f}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family:-apple-system,system-ui,sans-serif}
+  #map{position:fixed;inset:0;background:#0d1117}
+  .top{position:fixed;top:env(safe-area-inset-top);left:0;right:0;z-index:500;display:flex;justify-content:space-between;align-items:center;padding:10px 14px;pointer-events:none}
+  .pill{pointer-events:auto;background:rgba(20,23,28,.85);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:20px;padding:7px 12px;font-size:13px;color:var(--mut)}
+  .pill b{color:var(--txt)}
+  .pill.err{color:#ff7b7b}
+  .plane{transition:transform .2s}
+  .plane svg{display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))}
+  #info{position:fixed;left:0;right:0;bottom:0;z-index:600;background:var(--card);border-top:1px solid var(--line);
+        padding:14px 16px calc(14px + env(safe-area-inset-bottom));transform:translateY(110%);transition:transform .25s}
+  #info.on{transform:none}
+  .hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .cs{font-size:24px;font-weight:700;color:var(--acc)}
+  .tag{background:#333b45;border-radius:6px;padding:2px 8px;font-size:14px;font-weight:600}
+  .tag.t{background:#1e4e79}
+  .x{margin-left:auto;background:none;border:0;color:var(--mut);font-size:26px;line-height:1;padding:0 4px}
+  .al{color:var(--mut);margin:2px 0 10px}
+  .route{display:flex;align-items:center;justify-content:space-between;background:#262c34;border-radius:10px;padding:10px 12px}
+  .ap{text-align:center;min-width:80px}
+  .ap .c{font-size:26px;font-weight:700}
+  .ap .n{font-size:11px;color:var(--mut);text-transform:uppercase;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mid{flex:1;margin:0 10px}
+  .bar{height:5px;background:#3a424d;border-radius:3px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--acc);width:0}
+  .eta{font-size:12px;color:var(--mut);text-align:center;margin-top:6px}
+  .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px}
+  .g{background:#262c34;border-radius:10px;padding:8px 10px}
+  .g .l{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.3px}
+  .g .v{font-size:17px;font-weight:600;margin-top:2px}
+  .leaflet-control-attribution{font-size:9px;background:rgba(0,0,0,.5)!important;color:#888}
+  .leaflet-control-attribution a{color:#aaa}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="top">
+  <div class="pill" id="count">lädt …</div>
+  <div class="pill" id="status">–</div>
+</div>
+<div id="info">
+  <div class="hd">
+    <span class="cs" id="iCs">–</span>
+    <span class="tag" id="iFlt"></span>
+    <span class="tag t" id="iType"></span>
+    <button class="x" id="close">×</button>
+  </div>
+  <div class="al" id="iAl">&nbsp;</div>
+  <div class="route">
+    <div class="ap"><div class="c" id="oC">–</div><div class="n" id="oN">&nbsp;</div></div>
+    <div class="mid"><div class="bar"><i id="prog"></i></div><div class="eta" id="eta">Strecke wird gesucht …</div></div>
+    <div class="ap"><div class="c" id="dC">–</div><div class="n" id="dN">&nbsp;</div></div>
+  </div>
+  <div class="grid">
+    <div class="g"><div class="l">Baro. Höhe</div><div class="v" id="iAlt">–</div></div>
+    <div class="g"><div class="l">Ground Speed</div><div class="v" id="iGs">–</div></div>
+    <div class="g"><div class="l">Kurs</div><div class="v" id="iTrk">–</div></div>
+    <div class="g"><div class="l">Kennz.</div><div class="v" id="iReg">–</div></div>
+    <div class="g"><div class="l">Vert. Rate</div><div class="v" id="iVs">–</div></div>
+    <div class="g"><div class="l">Squawk</div><div class="v" id="iSq">–</div></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const BAYERN = [48.95, 11.40];
+const POLL_MS = 8000;
+const SOURCES = [
+  (lat,lon,d)=>`https://api.adsb.lol/v2/lat/${lat}/lon/${lon}/dist/${d}`,
+  (lat,lon,d)=>`https://api.airplanes.live/v2/point/${lat}/${lon}/${d}`
+];
+let srcIdx = 0;
+
+const map = L.map('map',{zoomControl:false,attributionControl:true}).setView(BAYERN,7);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+  maxZoom:18, attribution:'© OpenStreetMap, © CARTO · Daten: adsb.lol (ODbL)'
+}).addTo(map);
+
+const planes = new Map();   // hex -> {marker, data, trail:[[lat,lon]]}
+let selHex = null, trailLine = null, routeLine = null;
+const routeCache = new Map();
+
+function altColor(alt){
+  if(alt==='ground'||alt==null) return '#9aa4b0';
+  const a = +alt;
+  if(a<5000) return '#ffd23f';
+  if(a<15000) return '#9be15d';
+  if(a<25000) return '#3fd0ff';
+  if(a<35000) return '#7b8cff';
+  return '#d77bff';
+}
+function svgPlane(color,size){
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24"><path fill="${color}" stroke="#000" stroke-width=".6"
+   d="M12 1.5c.8 0 1.3.9 1.3 2v5.6l8.2 4.6v2l-8.2-2.4v4.6l2.4 1.8v1.6L12 20.4l-3.7.9v-1.6l2.4-1.8v-4.6L2.5 15.7v-2l8.2-4.6V3.5c0-1.1.5-2 1.3-2z"/></svg>`;
+}
+function icon(d,sel){
+  const size = sel?34:24;
+  const col = sel?'#ff5a1f':altColor(d.alt_baro);
+  const rot = d.track ?? d.true_heading ?? 0;
+  return L.divIcon({className:'',iconSize:[size,size],iconAnchor:[size/2,size/2],
+    html:`<div class="plane" style="transform:rotate(${rot}deg)">${svgPlane(col,size)}</div>`});
+}
+
+function radiusNm(){
+  const b = map.getBounds(), c = map.getCenter();
+  const m = c.distanceTo(b.getNorthEast());
+  return Math.max(20, Math.min(250, Math.round(m/1852)));
+}
+
+async function load(){
+  const c = map.getCenter(), d = radiusNm();
+  const lat = c.lat.toFixed(3), lon = c.lng.toFixed(3);
+  for(let tries=0; tries<SOURCES.length; tries++){
+    const i = (srcIdx+tries)%SOURCES.length;
+    try{
+      const r = await fetch(SOURCES[i](lat,lon,d),{cache:'no-store'});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const j = await r.json();
+      srcIdx = i;
+      update(j.ac||j.aircraft||[]);
+      setStatus(`${i===0?'adsb.lol':'airplanes.live'} · ${new Date().toLocaleTimeString('de-DE')}`);
+      return;
+    }catch(e){ console.warn('Quelle',i,e); }
+  }
+  setStatus('Keine Daten (Netz/CORS?)',true);
+}
+function setStatus(t,err){ const s=document.getElementById('status'); s.textContent=t; s.classList.toggle('err',!!err); }
+
+function update(list){
+  const seen = new Set();
+  let n=0;
+  for(const d of list){
+    if(d.lat==null||d.lon==null) continue;
+    n++; seen.add(d.hex);
+    let p = planes.get(d.hex);
+    if(!p){
+      const m = L.marker([d.lat,d.lon],{icon:icon(d,d.hex===selHex)}).addTo(map);
+      m.on('click',()=>select(d.hex));
+      p = {marker:m,data:d,trail:[]};
+      planes.set(d.hex,p);
+    }else{
+      p.marker.setLatLng([d.lat,d.lon]);
+      const oldT = p.data.track, oldA = altColor(p.data.alt_baro);
+      p.data = d;
+      if(oldT!==d.track || oldA!==altColor(d.alt_baro) || d.hex===selHex) p.marker.setIcon(icon(d,d.hex===selHex));
+    }
+    const last = p.trail[p.trail.length-1];
+    if(!last || last[0]!==d.lat || last[1]!==d.lon) p.trail.push([d.lat,d.lon]);
+    if(p.trail.length>400) p.trail.shift();
+  }
+  for(const [hex,p] of planes){
+    if(!seen.has(hex) && hex!==selHex){ map.removeLayer(p.marker); planes.delete(hex); }
+  }
+  document.getElementById('count').innerHTML = `<b>${n}</b> Flugzeuge`;
+  if(selHex && planes.has(selHex)) fillInfo(planes.get(selHex).data);
+}
+
+function fmt(n,u){ return n==null?'–':Math.round(n).toLocaleString('de-DE')+(u?' '+u:''); }
+function hav(a,b,c,d){ const R=3440.065,r=Math.PI/180;
+  const x=Math.sin((c-a)*r/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin((d-b)*r/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x)); }
+
+function select(hex){
+  const prev = selHex; selHex = hex;
+  if(prev && planes.has(prev)){ const p=planes.get(prev); p.marker.setIcon(icon(p.data,false)); }
+  const p = planes.get(hex); if(!p) return;
+  p.marker.setIcon(icon(p.data,true));
+  document.getElementById('info').classList.add('on');
+  ['oC','dC'].forEach(id=>document.getElementById(id).textContent='–');
+  ['oN','dN'].forEach(id=>document.getElementById(id).innerHTML='&nbsp;');
+  document.getElementById('iAl').innerHTML='&nbsp;';
+  document.getElementById('prog').style.width='0';
+  document.getElementById('eta').textContent='Strecke wird gesucht …';
+  if(routeLine){ map.removeLayer(routeLine); routeLine=null; }
+  fillInfo(p.data);
+  lookupRoute(p.data);
+}
+
+function fillInfo(d){
+  const cs = (d.flight||'').trim() || d.hex.toUpperCase();
+  document.getElementById('iCs').textContent = cs;
+  document.getElementById('iFlt').textContent = d.r || d.hex.toUpperCase();
+  document.getElementById('iType').textContent = d.t || '?';
+  document.getElementById('iAlt').textContent = d.alt_baro==='ground'?'Boden':fmt(d.alt_baro,'ft');
+  document.getElementById('iGs').textContent = fmt(d.gs,'kts');
+  document.getElementById('iTrk').textContent = d.track==null?'–':Math.round(d.track)+'°';
+  document.getElementById('iReg').textContent = d.r || '–';
+  const vs = d.baro_rate ?? d.geom_rate;
+  document.getElementById('iVs').textContent = vs==null?'–':(vs>0?'+':'')+fmt(vs,'fpm');
+  document.getElementById('iSq').textContent = d.squawk || '–';
+  // Spur
+  const p = planes.get(d.hex);
+  if(p){
+    if(trailLine) trailLine.setLatLngs(p.trail);
+    else trailLine = L.polyline(p.trail,{color:'#8a5cff',weight:3,opacity:.9}).addTo(map);
+  }
+  updateProgress(d);
+}
+
+async function lookupRoute(d){
+  const cs = (d.flight||'').trim();
+  if(!cs){ document.getElementById('eta').textContent='Kein Rufzeichen'; return; }
+  let r = routeCache.get(cs);
+  if(r===undefined){
+    try{
+      const res = await fetch(`https://api.adsbdb.com/v0/callsign/${encodeURIComponent(cs)}`);
+      const j = res.ok ? await res.json() : null;
+      r = j?.response?.flightroute || null;
+    }catch(e){ r = null; }
+    routeCache.set(cs,r);
+  }
+  if(selHex!==d.hex) return;
+  if(!r){ document.getElementById('eta').textContent='Strecke unbekannt'; return; }
+  const o=r.origin, ds=r.destination;
+  document.getElementById('oC').textContent = o.iata_code||o.icao_code;
+  document.getElementById('oN').textContent = o.municipality||o.name;
+  document.getElementById('dC').textContent = ds.iata_code||ds.icao_code;
+  document.getElementById('dN').textContent = ds.municipality||ds.name;
+  document.getElementById('iAl').textContent = r.airline?.name || '';
+  const p = planes.get(d.hex);
+  if(p){
+    p.route = r;
+    routeLine = L.polyline([[d.lat,d.lon],[ds.latitude,ds.longitude]],{color:'#8a5cff',weight:2,dashArray:'6 8',opacity:.8}).addTo(map);
+    updateProgress(p.data);
+  }
+}
+
+function updateProgress(d){
+  const p = planes.get(d.hex); const r = p?.route; if(!r) return;
+  const o=r.origin, ds=r.destination;
+  const tot = hav(o.latitude,o.longitude,ds.latitude,ds.longitude);
+  const rem = hav(d.lat,d.lon,ds.latitude,ds.longitude);
+  const pct = Math.max(0,Math.min(100,(1-rem/tot)*100));
+  document.getElementById('prog').style.width = pct+'%';
+  let t = `${fmt(rem,'NM')} verbleibend`;
+  if(d.gs>50){ const h=rem/d.gs; t += ` · ca. ${Math.floor(h)}:${String(Math.round(h%1*60)).padStart(2,'0')} h`; }
+  document.getElementById('eta').textContent = t;
+  if(routeLine) routeLine.setLatLngs([[d.lat,d.lon],[ds.latitude,ds.longitude]]);
+}
+
+document.getElementById('close').onclick = ()=>{
+  document.getElementById('info').classList.remove('on');
+  if(selHex && planes.has(selHex)){ const p=planes.get(selHex); p.marker.setIcon(icon(p.data,false)); }
+  selHex=null;
+  if(trailLine){ map.removeLayer(trailLine); trailLine=null; }
+  if(routeLine){ map.removeLayer(routeLine); routeLine=null; }
+};
+
+let moveT;
+map.on('moveend',()=>{ clearTimeout(moveT); moveT=setTimeout(load,400); });
+load();
+setInterval(()=>{ if(!document.hidden) load(); }, POLL_MS);
+</script>
+</body>
+</html>
