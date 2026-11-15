@@ -79,6 +79,8 @@
 const BAYERN = [48.95, 11.40];
 const POLL_MS = 8000;
 const SOURCES = [
+  (lat,lon,d)=>`proxy/v2/lat/${lat}/lon/${lon}/dist/${d}`,
+  (lat,lon,d)=>`proxy2/v2/point/${lat}/${lon}/${d}`,
   (lat,lon,d)=>`https://api.adsb.lol/v2/lat/${lat}/lon/${lon}/dist/${d}`,
   (lat,lon,d)=>`https://api.airplanes.live/v2/point/${lat}/${lon}/${d}`
 ];
@@ -131,7 +133,7 @@ async function load(){
       const j = await r.json();
       srcIdx = i;
       update(j.ac||j.aircraft||[]);
-      setStatus(`${i===0?'adsb.lol':'airplanes.live'} · ${new Date().toLocaleTimeString('de-DE')}`);
+      setStatus(`${['Mac mini · adsb.lol','Mac mini · airplanes.live','adsb.lol','airplanes.live'][i]} · ${new Date().toLocaleTimeString('de-DE')}`);
       return;
     }catch(e){ console.warn('Quelle',i,e); }
   }
